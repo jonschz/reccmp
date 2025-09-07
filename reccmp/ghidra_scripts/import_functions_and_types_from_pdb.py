@@ -146,15 +146,15 @@ def import_function_into_ghidra(
     hex_original_address = f"{pdb_function.match_info.orig_addr:x}"
 
     # Find the Ghidra function at that address
-    ghidra_address = getAddressFactory().getAddress(hex_original_address)
+    ghidra_address = api.getAddressFactory().getAddress(hex_original_address)
     # pylint: disable=possibly-used-before-assignment
     function_importer = PdbFunctionImporter.build(
         api, pdb_function, type_importer, name_substitutions
     )
 
-    ghidra_function = getFunctionAt(ghidra_address)
+    ghidra_function = api.getFunctionAt(ghidra_address)
     if ghidra_function is None:
-        ghidra_function = createFunction(ghidra_address, "temp")
+        ghidra_function = api.createFunction(ghidra_address, "temp")
         assert (
             ghidra_function is not None
         ), f"Failed to create function at {ghidra_address}"
@@ -199,6 +199,7 @@ def do_with_error_handling(step_name: str, action: Callable[[], None]):
 
 
 def do_execute_import(
+    api: "FlatProgramAPI | None",
     extraction: "PdbFunctionExtractor",
     ignore_types: set[str],
     ignore_functions: set[int],
@@ -206,11 +207,9 @@ def do_execute_import(
 ):
     pdb_functions = extraction.get_function_list()
 
-    if not GLOBALS.running_from_ghidra:
+    if api is None:
         logger.info("Completed the dry run outside Ghidra.")
         return
-
-    api = FlatProgramAPI(currentProgram())
 
     # pylint: disable=possibly-used-before-assignment
     type_importer = PdbTypeImporter(api, extraction, ignore_types=ignore_types)
@@ -271,7 +270,7 @@ def log_and_track_failure(
         )
 
 
-def find_target() -> "RecCmpTarget":
+def find_target(api: "FlatProgramAPI | None") -> "RecCmpTarget":
     """
     Known issue: In order to use this script, `reccmp-build.yml` must be located in the same directory as `reccmp-project.yml`.
     """
@@ -303,8 +302,8 @@ def find_target() -> "RecCmpTarget":
     file_handler.setFormatter(logging.root.handlers[0].formatter)
     logging.root.addHandler(file_handler)
 
-    if GLOBALS.running_from_ghidra:
-        GLOBALS.target_name = getProgramFile().getName()
+    if api is not None:
+        GLOBALS.target_name = api.getProgramFile().getName()
 
     matching_targets = [
         target_id
@@ -324,8 +323,16 @@ def find_target() -> "RecCmpTarget":
     return project.get(matching_targets[0])
 
 
-def main():
-    target = find_target()
+def main(provided_api: "FlatProgramAPI | None"):
+    match (provided_api, GLOBALS.running_from_ghidra):
+        case (None, False):
+            api = None
+        case (None, True):
+            api = FlatProgramAPI(currentProgram())
+        case (provided, _):
+            api = provided
+
+    target = find_target(api)
 
     logger.info("Importing file: %s", target.original_path)
 
@@ -344,6 +351,7 @@ def main():
     extractor = PdbFunctionExtractor(isle_compare)
     try:
         do_execute_import(
+            api,
             extractor,
             set(target.ghidra_config.ignore_types),
             set(target.ghidra_config.ignore_functions),
@@ -404,6 +412,6 @@ try:
         from reccmp.ghidra_scripts.lego_util.type_importer import PdbTypeImporter
 
     if __name__ == "__main__":
-        main()
+        main(None)
 finally:
     sys.path = sys_path_backup
