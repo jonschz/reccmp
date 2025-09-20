@@ -48,6 +48,27 @@ def main():
     )
     from ghidra.app.script import GhidraScriptUtil
 
+
+    # TODO: BEGIN NON-WORKING REMOTE REPOSITORY EXPERIMENTS
+    # - Another idea could be to store the project somewhere, not checked out, and update
+    #   - would only require to figure out pull and push, but not checkout
+
+    # adapter = GhidraProject.getServerRepository("localhost", 13100, "test-repo-2", True)
+
+
+    project = GhidraProject.createProject("C:\\Users\\Jonathan\\Documents\\ghidra", "ci-experiment", True)
+    # always returns `None`
+    adapter = project.getServerRepository("localhost", 13100, "test-repo-2", True)
+
+    # Does something, but struggles with Auth
+    adapter2 = project.getProjectManager().getRepositoryServerAdapter("localhost", 13100, True)
+    items = [x for x in adapter.getItemList("/")]
+    print(items)
+
+    return
+
+    # TODO: END NON-WORKING REMOTE REPOSITORY EXPERIMENTS
+
     # based on the source code of pyghidra.open_program()
     project = GhidraProject.openProject(
         "C:\\Users\\Jonathan\\Documents\\ghidra",
