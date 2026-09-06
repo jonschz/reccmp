@@ -11,6 +11,9 @@ from .cvinfo import (
     CvdumpTypeMap,
 )
 
+# TODO: Discuss if we want to split the file instead, and if so, what can/should be pulled out
+# pylint:disable=too-many-lines
+
 logger = logging.getLogger(__name__)
 
 
