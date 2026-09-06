@@ -85,24 +85,6 @@ class VirtualBasePointer:
     bases: list[VirtualBaseClass]
 
 
-class ScalarType(NamedTuple):
-    offset: int
-    name: str | None
-    type: CvInfoType
-
-    @property
-    def size(self) -> int:
-        return self.type.size
-
-    @property
-    def format_char(self) -> str:
-        return self.type.fmt
-
-    @property
-    def is_pointer(self) -> bool:
-        return self.type.pointer is not None
-
-
 class TypeInfo(NamedTuple):
     key: CvdumpTypeKey
     """The unique identifier from the PDB."""
@@ -118,6 +100,8 @@ class TypeInfo(NamedTuple):
     """Array only: Count of elements in the array."""
     array_element_size: int | None = None
     """Array only: Size in bytes of each array element."""
+    pointer_target_type: CvdumpTypeKey | None = None
+    """Pointer only: The actual type this pointer points to (`key` claims this to be a `void*`)"""
 
     def is_struct(self) -> bool:
         return self.members is not None
@@ -128,6 +112,25 @@ class TypeInfo(NamedTuple):
     def is_scalar(self) -> bool:
         # TODO: distinction between a class with zero members and no vtable?
         return self.members is None and self.array_type is None
+
+
+class ScalarType(NamedTuple):
+    offset: int
+    name: str | None
+    type: CvInfoType
+    type_info: TypeInfo
+
+    @property
+    def size(self) -> int:
+        return self.type.size
+
+    @property
+    def format_char(self) -> str:
+        return self.type.fmt
+
+    @property
+    def is_pointer(self) -> bool:
+        return self.type.pointer is not None
 
 
 def member_list_to_struct_string(members: list[ScalarType]) -> str:
@@ -388,7 +391,19 @@ class CvdumpTypesParser:
         obj_type = obj.get("type")
 
         if obj_type == "LF_POINTER":
-            return self.get(CVInfoTypeEnum.T_32PVOID)
+            pointer_target_type = obj.get("element_type")
+            assert pointer_target_type is not None
+            return TypeInfo(
+                key=CVInfoTypeEnum.T_32PVOID,
+                size=CvdumpTypeMap[CVInfoTypeEnum.T_32PVOID].size,
+                pointer_target_type=pointer_target_type,
+            )
+            # Code from https://github.com/isledecomp/reccmp/pull/385/changes, does not work
+
+            # element_type_key = obj.get("element_type")
+            # assert element_type_key is not None
+            # pointee_type = self.get(element_type_key)
+            # return TypeInfo(key=type_key, size=4, name=f"{pointee_type.name} *")
 
         if obj.get("is_forward_ref", False):
             # Get the forward reference to follow.
@@ -456,13 +471,7 @@ class CvdumpTypesParser:
         if obj.is_scalar():
             # Use obj.key here for alias types like LF_POINTER
             cvinfo = get_primitive(obj.key)
-            return [
-                ScalarType(
-                    offset=0,
-                    type=cvinfo,
-                    name=None,
-                )
-            ]
+            return [ScalarType(offset=0, type=cvinfo, name=None, type_info=obj)]
 
         if obj.is_array():
             assert obj.array_type is not None
@@ -476,6 +485,7 @@ class CvdumpTypesParser:
                     offset=i * obj.array_element_size + cm.offset,
                     type=cm.type,
                     name=join_member_names(f"[{i}]", cm.name),
+                    type_info=cm.type_info,
                 )
                 for i in range(obj.array_length)
                 for cm in array_element_members
@@ -493,6 +503,7 @@ class CvdumpTypesParser:
                 offset=m.offset + cm.offset,
                 type=cm.type,
                 name=join_member_names(m.name, cm.name),
+                type_info=cm.type_info,
             )
             for m in unique_members
             for cm in self.get_scalars(m.type)
@@ -544,6 +555,7 @@ class CvdumpTypesParser:
                         offset=this_extent + i,
                         name="(padding)",
                         type=get_primitive(CVInfoTypeEnum.T_UCHAR),
+                        type_info=obj,
                     ),
                 )
 
