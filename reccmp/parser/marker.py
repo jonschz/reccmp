@@ -40,7 +40,7 @@ markerRegex = re.compile(
 
 
 markerExactRegex = re.compile(
-    r"\s*// (?P<type>[A-Z]+): (?P<module>[A-Z0-9]+) (?P<offset>0x[a-f0-9]+)(?: (?P<extra>.+))?\n?$"
+    r"\s*// (?P<type>[A-Z]+): (?P<module>[A-Z0-9]+) (?P<offset>0x[a-f0-9]+)(?: (?P<extra>(?:\S.*\S|\S)))?\n?$"
 )
 
 
