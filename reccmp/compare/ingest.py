@@ -151,6 +151,7 @@ def load_markers(
     orig_bin: PEImage,
     target_id: str,
     db: EntityDb,
+    types: CvdumpTypesParser,
     encoding: str = "latin1",
     project_aliases: ProjectAliases | None = None,
     report: ReccmpReportProtocol = reccmp_report_nop,
@@ -215,7 +216,30 @@ def load_markers(
                 batch.set(ImageId.ORIG, fun.offset, name=fun.name)
 
         for var in codebase.iter_variables():
-            batch.set(ImageId.ORIG, var.offset, name=var.name, type=EntityType.DATA)
+            # TODO: Consider moving to dedicated step
+            batch.set(
+                ImageId.ORIG,
+                var.offset,
+                name=var.name,
+                type=EntityType.DATA,
+                no_recomp_symbol=var.no_recomp_symbol,
+            )
+            data_type_key = None
+            if var.data_type_annotation is not None:
+                data_type = types.get_by_name(var.data_type_annotation)
+                if data_type is None:
+                    # report() TODO
+                    pass
+                else:
+                    data_type_key = data_type.key
+                    batch.set(
+                        ImageId.ORIG,
+                        var.offset,
+                        name=var.name,
+                        data_type=data_type_key,
+                        size=data_type.size,
+                    )
+
             if var.is_static and var.parent_function is not None:
                 batch.set(
                     ImageId.ORIG,

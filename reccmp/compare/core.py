@@ -156,6 +156,7 @@ class Compare:
             self.orig_bin,
             self.target_id,
             self._db,
+            self.types,
             self.bin_encoding,
             self.project_aliases,
             self.report,

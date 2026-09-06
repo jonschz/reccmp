@@ -85,6 +85,24 @@ class VirtualBasePointer:
     bases: list[VirtualBaseClass]
 
 
+class ScalarType(NamedTuple):
+    offset: int
+    name: str | None
+    type: CvInfoType
+
+    @property
+    def size(self) -> int:
+        return self.type.size
+
+    @property
+    def format_char(self) -> str:
+        return self.type.fmt
+
+    @property
+    def is_pointer(self) -> bool:
+        return self.type.pointer is not None
+
+
 class TypeInfo(NamedTuple):
     key: CvdumpTypeKey
     """The unique identifier from the PDB."""
@@ -100,8 +118,6 @@ class TypeInfo(NamedTuple):
     """Array only: Count of elements in the array."""
     array_element_size: int | None = None
     """Array only: Size in bytes of each array element."""
-    pointer_target_type: CvdumpTypeKey | None = None
-    """Pointer only: The actual type this pointer points to (`key` claims this to be a `void*`)"""
 
     def is_struct(self) -> bool:
         return self.members is not None
@@ -112,25 +128,6 @@ class TypeInfo(NamedTuple):
     def is_scalar(self) -> bool:
         # TODO: distinction between a class with zero members and no vtable?
         return self.members is None and self.array_type is None
-
-
-class ScalarType(NamedTuple):
-    offset: int
-    name: str | None
-    type: CvInfoType
-    type_info: TypeInfo
-
-    @property
-    def size(self) -> int:
-        return self.type.size
-
-    @property
-    def format_char(self) -> str:
-        return self.type.fmt
-
-    @property
-    def is_pointer(self) -> bool:
-        return self.type.pointer is not None
 
 
 def member_list_to_struct_string(members: list[ScalarType]) -> str:
@@ -391,19 +388,7 @@ class CvdumpTypesParser:
         obj_type = obj.get("type")
 
         if obj_type == "LF_POINTER":
-            pointer_target_type = obj.get("element_type")
-            assert pointer_target_type is not None
-            return TypeInfo(
-                key=CVInfoTypeEnum.T_32PVOID,
-                size=CvdumpTypeMap[CVInfoTypeEnum.T_32PVOID].size,
-                pointer_target_type=pointer_target_type,
-            )
-            # Code from https://github.com/isledecomp/reccmp/pull/385/changes, does not work
-
-            # element_type_key = obj.get("element_type")
-            # assert element_type_key is not None
-            # pointee_type = self.get(element_type_key)
-            # return TypeInfo(key=type_key, size=4, name=f"{pointee_type.name} *")
+            return self.get(CVInfoTypeEnum.T_32PVOID)
 
         if obj.get("is_forward_ref", False):
             # Get the forward reference to follow.
@@ -458,10 +443,74 @@ class CvdumpTypesParser:
             array_element_size=array_element_size,
         )
 
-    def get_by_name(self, name: str) -> TypeInfo:
-        """Find the complex type with the given name."""
-        # TODO
-        raise NotImplementedError
+    def get_by_name(self, name: str) -> TypeInfo | None:
+        """
+        Searches the type database for `name`.
+        Also supports arrays with decimal length (e.g. `MyType[20]`);
+        such array types will be created if the base type exists.
+
+        Limitations:
+        - Only supports classes / structures for now (in particular, primitives are not supported)
+        """
+
+        if name.endswith("]"):
+            # array
+            regex_match = re.match(r"(?P<name>[^\[\]]+)\[(?P<length>[0-9]+)\]", name)
+            if regex_match is None:
+                # TODO report / emit warning
+                # report()
+                return None
+
+            array_type = self.get_by_name(regex_match.group("name"))
+            if array_type is None:
+                # TODO report
+                return None
+            element_size = array_type.size
+            if element_size is None:
+                # TODO report
+                return None
+
+            array_length = int(regex_match.group("length"))
+
+            new_array_type_key = CvdumpTypeKey(max(self._raw) + 1)
+            self._raw[new_array_type_key] = ("", "LF_ARRAY")
+            self._keys[new_array_type_key] = CvdumpParsedType(
+                type="LF_ARRAY",
+                name=name,
+                size=element_size * array_length,
+                is_forward_ref=False,
+                udt=new_array_type_key,
+                array_type=array_type.key,
+            )
+
+            return self.get(new_array_type_key)
+
+        return self._get_class_by_name(name)
+
+    def _get_class_by_name(self, name: str) -> TypeInfo | None:
+        """Find the class or structure with the given name."""
+
+        expected_leaf_fragment = f"class name = {name},"
+        potential_hits = [
+            self.get(key)
+            for key, (leaf, _) in self._raw.items()
+            if expected_leaf_fragment in leaf
+        ]
+
+        # The same entry may appear multiple times (e.g. due to forward refs), so we deduplicate by key
+        # and also filter again by the name just to be sure
+        actual_hits = dict((hit.key, hit) for hit in potential_hits if hit.name == name)
+
+        match len(actual_hits):
+            case 0:
+                return None
+            case 1:
+                return next(iter(actual_hits.values()))
+            case _:
+                logger.warning(
+                    "Found multiple types matching '%s'. Using the first match", name
+                )
+                return next(iter(actual_hits.values()))
 
     def get_scalars(self, type_key: CvdumpTypeKey) -> list[ScalarType]:
         """Reduce the given type to a list of scalars so we can
@@ -471,7 +520,13 @@ class CvdumpTypesParser:
         if obj.is_scalar():
             # Use obj.key here for alias types like LF_POINTER
             cvinfo = get_primitive(obj.key)
-            return [ScalarType(offset=0, type=cvinfo, name=None, type_info=obj)]
+            return [
+                ScalarType(
+                    offset=0,
+                    type=cvinfo,
+                    name=None,
+                )
+            ]
 
         if obj.is_array():
             assert obj.array_type is not None
@@ -485,7 +540,6 @@ class CvdumpTypesParser:
                     offset=i * obj.array_element_size + cm.offset,
                     type=cm.type,
                     name=join_member_names(f"[{i}]", cm.name),
-                    type_info=cm.type_info,
                 )
                 for i in range(obj.array_length)
                 for cm in array_element_members
@@ -503,7 +557,6 @@ class CvdumpTypesParser:
                 offset=m.offset + cm.offset,
                 type=cm.type,
                 name=join_member_names(m.name, cm.name),
-                type_info=cm.type_info,
             )
             for m in unique_members
             for cm in self.get_scalars(m.type)
@@ -555,7 +608,6 @@ class CvdumpTypesParser:
                         offset=this_extent + i,
                         name="(padding)",
                         type=get_primitive(CVInfoTypeEnum.T_UCHAR),
-                        type_info=obj,
                     ),
                 )
 

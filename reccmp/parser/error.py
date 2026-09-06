@@ -108,6 +108,10 @@ class AlertCode(Enum):
     # ERROR: An alias matches a built-in marker type string, and was dropped.
     ALIAS_REDEFINES_BUILTIN = 209
 
+    # A VTABLE annotation is only allowed to have one extra argument, which is either FOLDED or the parent class in case of multiple inheritance.
+    # This error is raised if a VTABLE has multiple such arguments.
+    TOO_MANY_VTABLE_EXTRAS = 210
+
     # This code or higher is a critical error
     DECOMP_CRITICAL_START = 300
 

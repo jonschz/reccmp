@@ -224,7 +224,7 @@ class DecompParser:
         self.var_markers.empty()
         self.tbl_markers.empty()
 
-    def _syntax_warning(self, code):
+    def _syntax_warning(self, code: AlertCode):
         self.alerts.append(
             ParserAlert(
                 path=self.filename,
@@ -267,14 +267,12 @@ class DecompParser:
             end_line -= 1
 
         for marker in self.fun_markers.iter():
-            name_is_symbol = (
-                marker.extra is not None and marker.extra.lower() == "symbol"
-            )
+            name_is_symbol = any(extra.lower() == "symbol" for extra in marker.extras)
             if name_is_symbol and not lookup_by_name:
                 self._syntax_warning(AlertCode.SYMBOL_OPTION_IGNORED)
                 name_is_symbol = False
 
-            is_folded = marker.extra is not None and marker.extra.lower() == "folded"
+            is_folded = any(extra.lower() == "folded" for extra in marker.extras)
 
             self._symbols.append(
                 ParserFunction(
@@ -302,7 +300,21 @@ class DecompParser:
 
     def _vtable_done(self, class_name: str):
         for marker in self.tbl_markers.iter():
-            is_folded = marker.extra is not None and marker.extra.lower() == "folded"
+            # TODO: Rediscuss the syntax. I would actually prefer to change how we handle multiple inheritance here.
+            # Maybe
+            # // VTABLE: MYTARGET 0x1234 BASE_CLASS=MyBaseClass
+            # Would be a breaking change, to be discussed.
+            # For example, the current pattern does not work if a virtual base class is called "Folded"
+            match len(marker.extras):
+                case 0:
+                    extra = None
+                case 1:
+                    extra = marker.extras[0]
+                case _:
+                    self._syntax_warning(AlertCode.TOO_MANY_VTABLE_EXTRAS)
+                    extra = None
+
+            is_folded = extra is not None and extra.lower() == "folded"
 
             self._symbols.append(
                 ParserVtable(
@@ -312,7 +324,7 @@ class DecompParser:
                     offset=marker.offset,
                     name=self.curly.get_prefix(class_name),
                     filename=self.filename,
-                    base_class=None if is_folded else marker.extra,
+                    base_class=None if is_folded else extra,
                     is_folded=is_folded,
                 )
             )
@@ -328,6 +340,18 @@ class DecompParser:
             self.state = ReaderState.IN_FUNC_GLOBAL
         else:
             self.state = ReaderState.IN_GLOBAL
+
+    def _parse_extras(self, extras: tuple[str, ...]) -> dict[str, str]:
+        result: dict[str, str] = {}
+        for extra in extras:
+            split = extra.split("=", maxsplit=1)
+            if len(split) < 2:
+                # key only, like `SYMBOL` or `FOLDED`
+                result[extra.lower()] = ""
+            else:
+                # key + value, like `TYPE=_DIOBJECTDATAFORMAT[256]`
+                result[split[0].lower()] = split[1]
+        return result
 
     def _variable_done(
         self, variable_name: str | None = None, string: ParserCodeString | None = None
@@ -368,6 +392,11 @@ class DecompParser:
 
                     parent_function = fun_marker.offset
 
+                extra = self._parse_extras(marker.extras)
+
+                no_recomp_symbol = "no_recomp_symbol" in extra
+                data_type_annotation = extra.get("type")
+
                 self._symbols.append(
                     ParserVariable(
                         type=marker.type,
@@ -378,6 +407,8 @@ class DecompParser:
                         filename=self.filename,
                         is_static=is_static,
                         parent_function=parent_function,
+                        no_recomp_symbol=no_recomp_symbol,
+                        data_type_annotation=data_type_annotation,
                     )
                 )
 
