@@ -346,9 +346,13 @@ class VariableComparator:
                     exc_info=e,
                 )
 
-        assert (
-            data_size is not None and data_size > 0
-        ), f"Invalid data size: {data_size}"
+        if data_size == 0:
+            return (
+                create_comparison_item(
+                    var, error="Error materializing type, got a size of zero"
+                ),
+                [],
+            )
 
         try:
             orig_block = DataBlock.read(var.orig_addr, data_size, self.orig_bin)

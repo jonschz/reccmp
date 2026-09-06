@@ -93,8 +93,6 @@ def do_the_comparison(target: RecCmpTarget) -> Iterator[ComparisonItem]:
     for var in compare.get_variables():
         if var.name in target.report_config.ignore_variables:
             continue
-        if var.name != "c_dfDIKeyboard":
-            continue
 
         yield from do_compare_variable(variable_comparator, var)
 
