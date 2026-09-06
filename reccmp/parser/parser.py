@@ -68,7 +68,7 @@ class MarkerDict:
         return False
 
     def query(
-        self, category: MarkerCategory, module: str, extra: str | None = None
+        self, category: MarkerCategory, module: str, extra: tuple[str, ...] = ()
     ) -> DecompMarker | None:
         return self.markers.get((category, module, extra))
 
