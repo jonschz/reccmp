@@ -92,9 +92,13 @@ def do_the_comparison(target: RecCmpTarget) -> Iterator[ComparisonItem]:
     for var in compare.get_variables():
         if var.name in target.report_config.ignore_variables:
             continue
+        if var.name != "c_dfDIKeyboard":
+            continue
 
-        yield variable_comparator.compare_variable(var)
-
+        comparison_item = variable_comparator.compare_variable(var)
+        yield comparison_item
+        for synthetic_match in comparison_item.synthetic_matches:
+            yield variable_comparator.compare_variable(synthetic_match)
 
 def colorize_match_result(result: CompareResult) -> str:
     """Helper to return color string or not, depending on user preference"""
