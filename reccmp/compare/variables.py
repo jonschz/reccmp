@@ -161,8 +161,6 @@ class ComparisonItem(NamedTuple):
     # we could not retrieve it for some reason. (This is an error.)
     raw_only: bool = False
 
-    synthetic_matches: list[ReccmpMatch] = []
-
     @property
     def result(self) -> CompareResult:
         if self.error is not None:
@@ -180,13 +178,10 @@ def create_comparison_item(
     compared: list[ComparedOffset] | None = None,
     error: str | None = None,
     raw_only: bool = False,
-    synthetic_matches: list[ReccmpMatch] | None = None,
 ) -> ComparisonItem:
     """Helper to create the ComparisonItem from the fields in the reccmp database."""
     if compared is None:
         compared = []
-    if synthetic_matches is None:
-        synthetic_matches = []
     assert var.name is not None
 
     return ComparisonItem(
@@ -196,7 +191,6 @@ def create_comparison_item(
         compared=compared,
         error=error,
         raw_only=raw_only,
-        synthetic_matches=synthetic_matches,
     )
 
 
@@ -310,7 +304,9 @@ class VariableComparator:
             recomp_addr - recomp_ent.recomp_addr
         ), []
 
-    def compare_variable(self, var: ReccmpMatch) -> ComparisonItem:
+    def compare_variable(
+        self, var: ReccmpMatch
+    ) -> tuple[ComparisonItem, list[ReccmpMatch]]:
         # pylint: disable=too-many-locals
         assert var.name is not None
         type_key = CvdumpTypeKey(var.get("data_type")) if var.get("data_type") else None
@@ -358,7 +354,7 @@ class VariableComparator:
             orig_block = DataBlock.read(var.orig_addr, data_size, self.orig_bin)
         except InvalidVirtualReadError as ex:
             # Reading from orig can fail if the recomp variable is too large
-            return create_comparison_item(var, error=repr(ex))
+            return create_comparison_item(var, error=repr(ex)), []
 
         # Reading from recomp should never fail, so if it does, raising an exception is correct
         recomp_block = DataBlock.read(var.recomp_addr, data_size, self.recomp_bin)
@@ -373,7 +369,6 @@ class VariableComparator:
                     offset=i,
                     name="",
                     type=CvdumpTypeMap[CVInfoTypeEnum.T_NOTYPE],
-                    type_info=self.types.get(CVInfoTypeEnum.T_NOTYPE),
                 )
                 for i in range(data_size)
             ]
@@ -381,14 +376,17 @@ class VariableComparator:
             recomp_data = tuple(recomp_block.data)
         else:
             assert type_key is not None
-            compare_items = [sc for sc in self.types.get_scalars_gapless(type_key)]
+            compare_items = self.types.get_scalars_gapless(type_key)
             format_str = self.types.get_format_string(type_key)
 
             try:
                 orig_data = unpack(format_str, orig_block.data)
                 recomp_data = unpack(format_str, recomp_block.data)
             except StructError as e:
-                return create_comparison_item(var, error=f"Failed to unpack data: {e}")
+                return (
+                    create_comparison_item(var, error=f"Failed to unpack data: {e}"),
+                    [],
+                )
 
         compared: list[ComparedOffset] = []
         synthetic_matches: list[ReccmpMatch] = []
@@ -434,9 +432,11 @@ class VariableComparator:
                 )
             )
 
-        return create_comparison_item(
-            var,
-            compared=compared,
-            raw_only=raw_only,
-            synthetic_matches=synthetic_matches,
+        return (
+            create_comparison_item(
+                var,
+                compared=compared,
+                raw_only=raw_only,
+            ),
+            synthetic_matches,
         )
