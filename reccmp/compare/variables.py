@@ -15,7 +15,7 @@ from reccmp.cvdump.types import (
     CvdumpIntegrityError,
     ScalarType,
 )
-from reccmp.types import EntityType, ImageId
+from reccmp.types import ImageId
 
 logger = logging.getLogger(__name__)
 
@@ -251,46 +251,20 @@ class VariableComparator:
         return self.db.is_match(orig_addr, recomp_addr)
 
     def create_synthetic_match(
-        self, orig_addr: int, recomp_addr: int, member: ScalarType, parent_name: str
+        self, orig_addr: int, recomp_addr: int
     ) -> tuple[bool, list[ReccmpMatch]]:
-        if member.type_info.pointer_target_type is None:
-            return False, []
-
-        full_type = self.types.get(member.type_info.pointer_target_type)
-
-        size = full_type.size
-        if size is None:
-            return False, []
-
-        name = f"{parent_name}.{member.name} (SYNTHETIC)"
-
         with self.db.batch() as batch:
-            batch.set(
-                ImageId.RECOMP,
-                recomp_addr,
-                type=EntityType.DATA,
-                data_type=member.type_info.pointer_target_type,
-                size=size,
-                name=name,
-            )
-            batch.match(orig_addr, recomp_addr)
+            batch.set_recomp_addr(orig_addr, recomp_addr)
 
-        # If we got here, this match is forced to be correct. The comparison on the synthetic match below will tell if this
-        return True, [
-            ReccmpMatch(
-                orig_addr,
-                recomp_addr,
-                {
-                    "name": name,
-                    "orig_size": size,
-                    "recomp_size": size,
-                    "data_type": member.type_info.pointer_target_type,
-                },
-            )
-        ]
+        synthetic_match = self.db.get_one_match(orig_addr)
+        assert synthetic_match is not None
+
+        # The (orig_addr, recomp_addr) pair now matches by definition.
+        # The more interesting question if whether `synthetic_match` actually matches.
+        return True, [synthetic_match]
 
     def is_pointer_match_to_offset(
-        self, orig_addr: int, recomp_addr: int, member: ScalarType, parent_name: str
+        self, orig_addr: int, recomp_addr: int
     ) -> tuple[bool, list[ReccmpMatch]]:
         """Check whether these pointers point at the same offset of the same matched entity."""
         orig_ent = self.db.get(ImageId.ORIG, orig_addr, exact=False)
@@ -305,15 +279,21 @@ class VariableComparator:
             # probably can't happen, but the type system doesn't cover that at the moment
             return False, []
 
-        if (matched_orig_addr + orig_ent.any_size(ImageId.ORIG) <= orig_addr) and (
-            matched_recomp_addr + recomp_ent.any_size(ImageId.RECOMP) <= recomp_addr
-        ):
-            # the entities we found do not actually cover the address of interest,
-            # so the actual matched entity is missing. We attempt a synthetic match,
-            # i.e. forcing a match here and then comparing the data we point at.
-            return self.create_synthetic_match(
-                orig_addr, recomp_addr, member, parent_name
+        if (
+            (matched_orig_addr == orig_addr)  # Condition 1: the orig match is exact
+            and (
+                # Condition 2: There is a code annotation stating that the recomp symbol is missing
+                orig_ent.get("no_recomp_symbol", False)
             )
+            and (
+                # Condition 3: No entity in recomp has an overlap with this recomp address
+                matched_recomp_addr + recomp_ent.any_size(ImageId.RECOMP)
+                <= recomp_addr
+            )
+        ):
+            # We found a pointer to an entity that does not have a symbol in recomp.
+            # We therefore create a synthetic match.
+            return self.create_synthetic_match(orig_addr, recomp_addr)
 
         # Are both entities matched?
         if not isinstance(orig_ent, ReccmpMatch) or not isinstance(
@@ -401,9 +381,7 @@ class VariableComparator:
             recomp_data = tuple(recomp_block.data)
         else:
             assert type_key is not None
-            compare_items = [
-                sc for sc in self.types.get_scalars_gapless(type_key)
-            ]
+            compare_items = [sc for sc in self.types.get_scalars_gapless(type_key)]
             format_str = self.types.get_format_string(type_key)
 
             try:
@@ -420,7 +398,7 @@ class VariableComparator:
 
                 if not match:
                     match, local_synthetic_matches = self.is_pointer_match_to_offset(
-                        orig_val, recomp_val, member, parent_name=var.name
+                        orig_val, recomp_val
                     )
 
                     synthetic_matches.extend(local_synthetic_matches)

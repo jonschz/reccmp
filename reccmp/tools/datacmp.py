@@ -100,6 +100,7 @@ def do_the_comparison(target: RecCmpTarget) -> Iterator[ComparisonItem]:
         for synthetic_match in comparison_item.synthetic_matches:
             yield variable_comparator.compare_variable(synthetic_match)
 
+
 def colorize_match_result(result: CompareResult) -> str:
     """Helper to return color string or not, depending on user preference"""
 

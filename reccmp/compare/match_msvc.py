@@ -361,11 +361,13 @@ def match_variables(db: EntityDb, report: ReccmpReportProtocol = reccmp_report_n
                 recomp_addr = var_name_index.pop(name)
                 batch.match(ent.orig_addr, recomp_addr)
             else:
-                report(
-                    ReccmpEvent.NO_MATCH,
-                    ent.orig_addr,
-                    msg=f"Failed to match variable {name} at 0x{ent.orig_addr:x}",
-                )
+                # Entries with `no_recomp_symbol` set are allowed to remain unmatched
+                if not ent.get("no_recomp_symbol", False):
+                    report(
+                        ReccmpEvent.NO_MATCH,
+                        ent.orig_addr,
+                        msg=f"Failed to match variable {name} at 0x{ent.orig_addr:x}",
+                    )
 
 
 def match_strings(db: EntityDb, report: ReccmpReportProtocol = reccmp_report_nop):

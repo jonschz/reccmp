@@ -34,13 +34,13 @@ class MarkerType(Enum):
 
 
 markerRegex = re.compile(
-    r"\s*//\s*(?P<type>\w+):\s*(?P<module>\w+)\s+(?P<offset>0x[a-f0-9]+) *(?P<extra>\S.+\S)?",
+    r"\s*//\s*(?P<type>\w+):\s*(?P<module>\w+)\s+(?P<offset>0x[a-f0-9]+) *(?P<extra>.+)?",
     flags=re.I,
 )
 
 
 markerExactRegex = re.compile(
-    r"\s*// (?P<type>[A-Z]+): (?P<module>[A-Z0-9]+) (?P<offset>0x[a-f0-9]+)(?: (?P<extra>\S.+\S))?\n?$"
+    r"\s*// (?P<type>[A-Z]+): (?P<module>[A-Z0-9]+) (?P<offset>0x[a-f0-9]+)(?: (?P<extra>.+))?\n?$"
 )
 
 
@@ -62,12 +62,12 @@ class DecompMarker(NamedTuple):
     type: MarkerType
     module: str
     offset: int
-    extra: str | None = None
+    extras: tuple[str, ...] = ()
 
     @property
-    def key(self) -> tuple[MarkerCategory, str, str | None]:
+    def key(self) -> tuple[MarkerCategory, str, tuple[str, ...]]:
         """For use with the MarkerDict. To detect/avoid marker collision."""
-        return (MARKER_CATEGORY_MAP[self.type], self.module, self.extra)
+        return (MARKER_CATEGORY_MAP[self.type], self.module, self.extras)
 
 
 def normalize_target_aliases(aliases: TargetAliases) -> TargetAliases:
@@ -123,8 +123,10 @@ def match_marker(
     if match is None:
         return None
 
-    marker_type, target_name, offset_str, extra = match.groups()
+    marker_type, target_name, offset_str, raw_extra = match.groups()
     marker_type = resolve_alias(marker_type, target_name, aliases)
+
+    extras = tuple(raw_extra.split() if raw_extra is not None else ())
 
     try:
         enum_type = MarkerType[marker_type.upper()]
@@ -138,7 +140,7 @@ def match_marker(
         # we will emit a syntax error.
         module=target_name.upper(),
         offset=int(offset_str, 16),
-        extra=extra,
+        extras=extras,
     )
 
 

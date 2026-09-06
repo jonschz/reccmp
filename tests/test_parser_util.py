@@ -200,17 +200,17 @@ def test_marker_extra_spaces():
     """The extra field can contain spaces"""
     marker = match_marker("// VTABLE: TEST 0x1234 S p a c e s")
     assert marker is not None
-    assert marker.extra == "S p a c e s"
+    assert marker.extras == "S p a c e s"
 
     # Trailing spaces removed
     marker = match_marker("// VTABLE: TEST 0x8888 spaces    ")
     assert marker is not None
-    assert marker.extra == "spaces"
+    assert marker.extras == "spaces"
 
     # Trailing newline removed if present
     marker = match_marker("// VTABLE: TEST 0x5555 newline\n")
     assert marker is not None
-    assert marker.extra == "newline"
+    assert marker.extras == "newline"
 
 
 def test_marker_trailing_spaces():
@@ -220,7 +220,7 @@ def test_marker_trailing_spaces():
     marker = match_marker("// VTABLE: TEST 0x1234     ")
     assert marker is not None
     assert marker.offset == 0x1234
-    assert marker.extra is None
+    assert marker.extras is None
 
 
 def test_marker_aliases():
