@@ -2,8 +2,9 @@
 
 import io
 from dataclasses import dataclass
+import logging
 from pathlib import PurePath
-from typing import Iterator
+from typing import Iterable, Iterator
 from enum import Enum
 from .util import (
     get_class_name,
@@ -33,6 +34,8 @@ from .node import (
 )
 from .error import ParserAlert, AlertCode
 
+logger = logging.getLogger(__name__)
+
 
 class ReaderState(Enum):
     SEARCH = 0
@@ -53,6 +56,21 @@ class ReccmpParserResult:
     tokens: tuple[ParserSymbol, ...]
     alerts: tuple[ParserAlert, ...]
     path: PurePath
+
+
+def _dict_with_lower_keys(d: Iterable[tuple[str, str]]) -> dict[str, str]:
+    return dict((key.lower(), value) for key, value in d)
+
+
+def _set_with_lower_keys(s: frozenset[str]) -> set[str]:
+    return set(key.lower() for key in s)
+
+
+def _pop_from_set(s: set[str], value: str) -> bool:
+    """Behaves like dict.remove(), but returns a boolean whether the value was contained instead of raising an exception."""
+    result = value in s
+    s.discard(value)
+    return result
 
 
 class MarkerDict:
@@ -238,6 +256,12 @@ class DecompParser:
         self._syntax_warning(code)
         self._recover()
 
+    def _warn_if_markers_not_empty(
+        self, extra_strings: dict[str, str], extra_flags: set[str]
+    ):
+        if len(extra_strings) > 0 or len(extra_flags) > 0:
+            self._syntax_warning(AlertCode.INVALID_EXTRA)
+
     def _function_starts_here(self):
         self.function_start = self.line_number
 
@@ -267,12 +291,17 @@ class DecompParser:
             end_line -= 1
 
         for marker in self.fun_markers.iter():
-            name_is_symbol = any(extra.lower() == "symbol" for extra in marker.extras)
+            extra_strings = _dict_with_lower_keys(marker.extra_strings)
+            extra_flags = _set_with_lower_keys(marker.extra_flags)
+
+            name_is_symbol = _pop_from_set(extra_flags, "symbol")
             if name_is_symbol and not lookup_by_name:
                 self._syntax_warning(AlertCode.SYMBOL_OPTION_IGNORED)
                 name_is_symbol = False
 
-            is_folded = any(extra.lower() == "folded" for extra in marker.extras)
+            is_folded = _pop_from_set(extra_flags, "folded")
+
+            self._warn_if_markers_not_empty(extra_strings, extra_flags)
 
             self._symbols.append(
                 ParserFunction(
@@ -300,21 +329,32 @@ class DecompParser:
 
     def _vtable_done(self, class_name: str):
         for marker in self.tbl_markers.iter():
-            # TODO: Rediscuss the syntax. I would actually prefer to change how we handle multiple inheritance here.
-            # Maybe
-            # // VTABLE: MYTARGET 0x1234 BASE_CLASS=MyBaseClass
-            # Would be a breaking change, to be discussed.
-            # For example, the current pattern does not work if a virtual base class is called "Folded"
-            match len(marker.extras):
-                case 0:
-                    extra = None
-                case 1:
-                    extra = marker.extras[0]
-                case _:
-                    self._syntax_warning(AlertCode.TOO_MANY_VTABLE_EXTRAS)
-                    extra = None
+            # A VTABLE marker supports the following extras:
+            # - FOLDED
+            # - BASE_CLASS="base_class"
+            # - Legacy: non-keyed base class `// VTABLE: TARGET 0x1234 SomeBaseClass`
+            extra_strings = _dict_with_lower_keys(marker.extra_strings)
+            extra_flags = _set_with_lower_keys(marker.extra_flags)
 
-            is_folded = extra is not None and extra.lower() == "folded"
+            is_folded = _pop_from_set(extra_flags, "folded")
+
+            if len(extra_flags) == 1 and len(extra_strings) == 0:
+                # Legacy base class annotation.
+                # Need to use the original extra_flags because we don't want lower case here.
+                base_class: str | None = next(iter(marker.extra_flags))
+                extra_flags.pop()
+                logger.warning(
+                    'Legacy VTABLE base class annotation used above %s:%i. Change to `// VTABLE: %s 0x%x BASE_CLASS="%s"`.',
+                    self.filename.name,
+                    self.line_number,
+                    marker.module,
+                    marker.offset,
+                    base_class,
+                )
+            else:
+                base_class = extra_strings.pop("base_class", None)
+
+            self._warn_if_markers_not_empty(extra_strings, extra_flags)
 
             self._symbols.append(
                 ParserVtable(
@@ -324,7 +364,7 @@ class DecompParser:
                     offset=marker.offset,
                     name=self.curly.get_prefix(class_name),
                     filename=self.filename,
-                    base_class=None if is_folded else extra,
+                    base_class=base_class,
                     is_folded=is_folded,
                 )
             )
@@ -340,18 +380,6 @@ class DecompParser:
             self.state = ReaderState.IN_FUNC_GLOBAL
         else:
             self.state = ReaderState.IN_GLOBAL
-
-    def _parse_extras(self, extras: tuple[str, ...]) -> dict[str, str]:
-        result: dict[str, str] = {}
-        for extra in extras:
-            split = extra.split("=", maxsplit=1)
-            if len(split) < 2:
-                # key only, like `SYMBOL` or `FOLDED`
-                result[extra.lower()] = ""
-            else:
-                # key + value, like `TYPE=_DIOBJECTDATAFORMAT[256]`
-                result[split[0].lower()] = split[1]
-        return result
 
     def _variable_done(
         self, variable_name: str | None = None, string: ParserCodeString | None = None
@@ -392,10 +420,15 @@ class DecompParser:
 
                     parent_function = fun_marker.offset
 
-                extra = self._parse_extras(marker.extras)
+                extra_strings = _dict_with_lower_keys(marker.extra_strings)
+                extra_flags = _set_with_lower_keys(marker.extra_flags)
 
-                no_recomp_symbol = "no_recomp_symbol" in extra
-                data_type_annotation = extra.get("type")
+                no_recomp_symbol = "no_recomp_symbol" in extra_flags
+                extra_flags.discard("no_recomp_symbol")
+
+                data_type_annotation = extra_strings.pop("type", None)
+
+                self._warn_if_markers_not_empty(extra_strings, extra_flags)
 
                 self._symbols.append(
                     ParserVariable(
