@@ -18,6 +18,7 @@ from .util import (
 )
 from .marker import (
     DecompMarker,
+    DecompMarkerKeyType,
     MarkerCategory,
     MarkerType,
     match_marker,
@@ -75,7 +76,7 @@ def _pop_from_set(s: set[str], value: str) -> bool:
 
 class MarkerDict:
     def __init__(self) -> None:
-        self.markers: dict = {}
+        self.markers: dict[DecompMarkerKeyType, DecompMarker] = {}
 
     def insert(self, marker: DecompMarker) -> bool:
         """Return True if this insert would overwrite"""
@@ -86,9 +87,13 @@ class MarkerDict:
         return False
 
     def query(
-        self, category: MarkerCategory, module: str, extra: tuple[str, ...] = ()
+        self,
+        category: MarkerCategory,
+        module: str,
+        extra_strings: tuple[tuple[str, str], ...] = (),
+        extra_flags: frozenset[str] = frozenset(),
     ) -> DecompMarker | None:
-        return self.markers.get((category, module, extra))
+        return self.markers.get((category, module, extra_strings, extra_flags))
 
     def iter(self) -> Iterator[DecompMarker]:
         for _, marker in self.markers.items():
@@ -423,8 +428,7 @@ class DecompParser:
                 extra_strings = _dict_with_lower_keys(marker.extra_strings)
                 extra_flags = _set_with_lower_keys(marker.extra_flags)
 
-                no_recomp_symbol = "no_recomp_symbol" in extra_flags
-                extra_flags.discard("no_recomp_symbol")
+                no_recomp_symbol = _pop_from_set(extra_flags, "no_recomp_symbol")
 
                 data_type_annotation = extra_strings.pop("type", None)
 

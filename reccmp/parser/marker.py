@@ -75,6 +75,12 @@ MARKER_CATEGORY_MAP = {
 }
 
 
+DecompMarkerKeyType = tuple[
+    MarkerCategory, str, tuple[tuple[str, str], ...], frozenset[str]
+]
+"""Key type for MarkerDict. Must be hashable."""
+
+
 class DecompMarker(NamedTuple):
     type: MarkerType
     module: str
@@ -86,8 +92,8 @@ class DecompMarker(NamedTuple):
     @property
     def key(
         self,
-    ) -> tuple[MarkerCategory, str, tuple[tuple[str, str], ...], frozenset[str]]:
-        """For use with the MarkerDict. To detect/avoid marker collision. Must be hashable."""
+    ) -> DecompMarkerKeyType:
+        """For use with the MarkerDict. To detect/avoid marker collision."""
         return (
             MARKER_CATEGORY_MAP[self.type],
             self.module,
