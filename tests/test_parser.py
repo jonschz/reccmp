@@ -256,7 +256,7 @@ def test_function_with_spaces(parser):
     ignore but should alert to this."""
     parser.read("""\
         // FUNCTION: TEST 0x1234
-           
+
         inline void test_function() { };
         """)
     assert len(parser.functions) == 1
@@ -268,7 +268,7 @@ def test_function_with_spaces_implicit(parser):
     """Same as above, but for implicit lookup-by-name"""
     parser.read("""\
         // FUNCTION: TEST 0x1234
-           
+
         // Implicit::Method
         """)
     assert len(parser.functions) == 1
@@ -653,7 +653,8 @@ def test_function_symbol_option(parser):
     assert parser.functions[0].name_is_symbol is True
     assert parser.functions[1].name_is_symbol is True  # Lower-case is okay (for now)
     assert parser.functions[2].name_is_symbol is False  # Must be "symbol"
-    assert len(parser.alerts) == 0
+    assert len(parser.alerts) == 1
+    assert parser.alerts[0].code == AlertCode.INVALID_EXTRA
 
 
 def test_function_symbol_option_multiple(parser):
