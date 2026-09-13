@@ -44,7 +44,7 @@ MARKER_REGEX = re.compile(
 )
 
 
-SINGLE_MARKER_EXTRA_REGEX_STR = r'(?P<key>\w+)(?:=(?P<value>\"(?:[^\\"]|\\[\w"\\])*"))?'
+SINGLE_MARKER_EXTRA_REGEX_STR = r'(?P<key>\w+)(?:=(?P<value>"(?:[^\\"]|\\[\w"\\])*"))?'
 SINGLE_MARKER_EXTRA_REGEX = re.compile(SINGLE_MARKER_EXTRA_REGEX_STR)
 """Matches `SYMBOL` or `KEY="VALUE"` where VALUE can be any valid JSON string."""
 
@@ -54,7 +54,7 @@ FULL_MARKER_EXTRA_REGEX = re.compile(
 """Matches the full `extras` part of a marker, e.g. `SYMBOL SOME_KEY="some_value" OTHER_MARKER`."""
 
 FULL_MARKER_EXTRA_REGEX_EXACT_STR = rf"({SINGLE_MARKER_EXTRA_REGEX_STR}(?: (?=\S)|$))*$"
-"""Strict version of `FULL_EXTRA_PART_REGEX`."""
+"""Strict version of `FULL_EXTRA_PART_REGEX`. Only allows single spaces between extras and no space at the end."""
 
 MARKER_EXACT_REGEX = re.compile(
     rf"\s*// (?P<type>[A-Z]+): (?P<module>[A-Z0-9]+) (?P<offset>0x[a-f0-9]+)(?: (?P<extra>{FULL_MARKER_EXTRA_REGEX_EXACT_STR}))?\n?$"
@@ -90,9 +90,7 @@ class DecompMarker(NamedTuple):
     extra_flags: frozenset[str] = frozenset()
 
     @property
-    def key(
-        self,
-    ) -> DecompMarkerKeyType:
+    def key(self) -> DecompMarkerKeyType:
         """For use with the MarkerDict. To detect/avoid marker collision."""
         return (
             MARKER_CATEGORY_MAP[self.type],

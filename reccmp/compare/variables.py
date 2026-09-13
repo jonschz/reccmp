@@ -8,12 +8,11 @@ from typing_extensions import Self
 from reccmp.formats import Image
 from reccmp.formats.exceptions import InvalidVirtualReadError
 from reccmp.compare.db import EntityDb, ReccmpMatch
-from reccmp.cvdump.cvinfo import CVInfoTypeEnum, CvdumpTypeKey, CvdumpTypeMap
+from reccmp.cvdump.cvinfo import CvdumpTypeKey
 from reccmp.cvdump.types import (
     CvdumpTypesParser,
     CvdumpKeyError,
     CvdumpIntegrityError,
-    ScalarType,
 )
 from reccmp.types import ImageId
 
@@ -235,16 +234,7 @@ class VariableComparator:
     orig_bin: Image
     recomp_bin: Image
 
-    def is_pointer_match(self, orig_addr: int, recomp_addr: int) -> bool:
-        """Check whether these pointers point at the same thing"""
-
-        # Null pointers considered matching
-        if orig_addr == 0 and recomp_addr == 0:
-            return True
-
-        return self.db.is_match(orig_addr, recomp_addr)
-
-    def create_synthetic_match(
+    def _create_synthetic_match(
         self, orig_addr: int, recomp_addr: int
     ) -> tuple[bool, list[ReccmpMatch]]:
         with self.db.batch() as batch:
@@ -257,10 +247,26 @@ class VariableComparator:
         # The more interesting question if whether `synthetic_match` actually matches.
         return True, [synthetic_match]
 
-    def is_pointer_match_to_offset(
+    def is_pointer_match(self, orig_addr: int, recomp_addr: int) -> bool:
+        """Check whether these pointers point at the same thing"""
+
+        # Null pointers considered matching
+        if orig_addr == 0 and recomp_addr == 0:
+            return True
+
+        return self.db.is_match(orig_addr, recomp_addr)
+
+    def is_pointer_match_to_offset_or_synthetic(
         self, orig_addr: int, recomp_addr: int
     ) -> tuple[bool, list[ReccmpMatch]]:
-        """Check whether these pointers point at the same offset of the same matched entity."""
+        """
+        Check whether these pointers point at the same offset of the same matched entity.
+
+        Returns:
+        - bool if the pointer is a match
+        - A list of synthetic matches creates in the process. These also need to be verified by the calling function.
+        """
+
         orig_ent = self.db.get(ImageId.ORIG, orig_addr, exact=False)
         recomp_ent = self.db.get(ImageId.RECOMP, recomp_addr, exact=False)
 
@@ -274,7 +280,11 @@ class VariableComparator:
             return False, []
 
         if (
-            (matched_orig_addr == orig_addr)  # Condition 1: the orig match is exact
+            (
+                # Condition 1: the orig match is exact
+                matched_orig_addr
+                == orig_addr
+            )
             and (
                 # Condition 2: There is a code annotation stating that the recomp symbol is missing
                 orig_ent.get("no_recomp_symbol", False)
@@ -287,7 +297,7 @@ class VariableComparator:
         ):
             # We found a pointer to an entity that does not have a symbol in recomp.
             # We therefore create a synthetic match.
-            return self.create_synthetic_match(orig_addr, recomp_addr)
+            return self._create_synthetic_match(orig_addr, recomp_addr)
 
         # Are both entities matched?
         if not isinstance(orig_ent, ReccmpMatch) or not isinstance(
@@ -368,19 +378,16 @@ class VariableComparator:
             # (i.e. if this is a static or non-public variable)
             # then we can only compare the raw bytes.
             compare_items = [
-                # FIXME type, temporary PoC
-                ScalarType(
-                    offset=i,
-                    name="",
-                    type=CvdumpTypeMap[CVInfoTypeEnum.T_NOTYPE],
-                )
-                for i in range(data_size)
+                DataOffset(offset=i, name="", pointer=False) for i in range(data_size)
             ]
             orig_data = tuple(orig_block.data)
             recomp_data = tuple(recomp_block.data)
         else:
             assert type_key is not None
-            compare_items = self.types.get_scalars_gapless(type_key)
+            compare_items = [
+                DataOffset(offset=sc.offset, name=sc.name or "", pointer=sc.is_pointer)
+                for sc in self.types.get_scalars_gapless(type_key)
+            ]
             format_str = self.types.get_format_string(type_key)
 
             try:
@@ -395,12 +402,14 @@ class VariableComparator:
         compared: list[ComparedOffset] = []
         synthetic_matches: list[ReccmpMatch] = []
         for orig_val, recomp_val, member in zip(orig_data, recomp_data, compare_items):
-            if member.is_pointer:
+            if member.pointer:
                 match = self.is_pointer_match(orig_val, recomp_val)
 
                 if not match:
-                    match, local_synthetic_matches = self.is_pointer_match_to_offset(
-                        orig_val, recomp_val
+                    match, local_synthetic_matches = (
+                        self.is_pointer_match_to_offset_or_synthetic(
+                            orig_val, recomp_val
+                        )
                     )
 
                     synthetic_matches.extend(local_synthetic_matches)

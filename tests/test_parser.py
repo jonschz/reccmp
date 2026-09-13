@@ -256,7 +256,7 @@ def test_function_with_spaces(parser):
     ignore but should alert to this."""
     parser.read("""\
         // FUNCTION: TEST 0x1234
-
+           
         inline void test_function() { };
         """)
     assert len(parser.functions) == 1
@@ -268,7 +268,7 @@ def test_function_with_spaces_implicit(parser):
     """Same as above, but for implicit lookup-by-name"""
     parser.read("""\
         // FUNCTION: TEST 0x1234
-
+           
         // Implicit::Method
         """)
     assert len(parser.functions) == 1

@@ -4,6 +4,8 @@ import re
 import logging
 from typing import NamedTuple
 from typing_extensions import NotRequired, TypedDict
+
+from reccmp.compare.event import ReccmpEvent, ReccmpReportProtocol, reccmp_report_nop
 from .cvinfo import (
     CvInfoType,
     CvdumpTypeKey,
@@ -446,7 +448,12 @@ class CvdumpTypesParser:
             array_element_size=array_element_size,
         )
 
-    def get_by_name(self, name: str) -> TypeInfo | None:
+    def get_by_name(
+        self,
+        name: str,
+        orig_addr: int,
+        report: ReccmpReportProtocol = reccmp_report_nop,
+    ) -> TypeInfo | None:
         """
         Searches the type database for `name`.
         Also supports arrays with decimal length (e.g. `MyType[20]`);
@@ -460,17 +467,24 @@ class CvdumpTypesParser:
             # array
             regex_match = re.match(r"(?P<name>[^\[\]]+)\[(?P<length>[0-9]+)\]", name)
             if regex_match is None:
-                # TODO report / emit warning
-                # report()
+                report(
+                    ReccmpEvent.INVALID_USER_DATA,
+                    orig_addr,
+                    msg=f"Invalid type annotation `{name}`: ends on `]` but does not match `<type>[<decimal number>]`",
+                )
                 return None
 
-            array_type = self.get_by_name(regex_match.group("name"))
+            array_type = self.get_by_name(regex_match.group("name"), orig_addr, report)
             if array_type is None:
-                # TODO report
+                # handled by "type not found" report in the calling function
                 return None
             element_size = array_type.size
             if element_size is None:
-                # TODO report
+                report(
+                    ReccmpEvent.INVALID_USER_DATA,
+                    orig_addr,
+                    msg=f"Resolved array element type {array_type} has no size",
+                )
                 return None
 
             array_length = int(regex_match.group("length"))
@@ -488,9 +502,14 @@ class CvdumpTypesParser:
 
             return self.get(new_array_type_key)
 
-        return self._get_class_by_name(name)
+        return self._get_class_by_name(name, orig_addr, report)
 
-    def _get_class_by_name(self, name: str) -> TypeInfo | None:
+    def _get_class_by_name(
+        self,
+        name: str,
+        orig_addr: int,
+        report: ReccmpReportProtocol = reccmp_report_nop,
+    ) -> TypeInfo | None:
         """Find the class or structure with the given name."""
 
         expected_leaf_fragment = f"class name = {name},"
@@ -510,8 +529,10 @@ class CvdumpTypesParser:
             case 1:
                 return next(iter(actual_hits.values()))
             case _:
-                logger.warning(
-                    "Found multiple types matching '%s'. Using the first match", name
+                report(
+                    ReccmpEvent.NON_UNIQUE_SYMBOL,
+                    orig_addr,
+                    msg="Found multiple types matching '%s'. Using the first match",
                 )
                 return next(iter(actual_hits.values()))
 

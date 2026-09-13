@@ -364,7 +364,9 @@ def match_variables(
 
             data_type_annotation = ent.get("data_type_annotation")
             if data_type_annotation is not None:
-                data_type = types.get_by_name(data_type_annotation)
+                data_type = types.get_by_name(
+                    data_type_annotation, ent.orig_addr, report
+                )
                 if data_type is None:
                     report(
                         ReccmpEvent.INVALID_USER_DATA,
