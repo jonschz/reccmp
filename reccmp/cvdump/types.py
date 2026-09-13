@@ -458,6 +458,7 @@ class CvdumpTypesParser:
         Searches the type database for `name`.
         Also supports arrays with decimal length (e.g. `MyType[20]`);
         such array types will be created if the base type exists.
+        `orig_addr` is only used for reporting.
 
         Limitations:
         - Only supports classes / structures for now (in particular, primitives are not supported)
@@ -479,14 +480,7 @@ class CvdumpTypesParser:
                 # handled by "type not found" report in the calling function
                 return None
             element_size = array_type.size
-            if element_size is None:
-                report(
-                    ReccmpEvent.INVALID_USER_DATA,
-                    orig_addr,
-                    msg=f"Resolved array element type {array_type} has no size",
-                )
-                return None
-
+            assert element_size is not None
             array_length = int(regex_match.group("length"))
 
             new_array_type_key = CvdumpTypeKey(max(self._raw) + 1)
