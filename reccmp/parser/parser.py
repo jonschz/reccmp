@@ -261,7 +261,7 @@ class DecompParser:
         self._syntax_warning(code)
         self._recover()
 
-    def _warn_if_markers_not_empty(
+    def _warn_if_extras_not_empty(
         self, extra_strings: dict[str, str], extra_flags: set[str]
     ):
         if len(extra_strings) > 0 or len(extra_flags) > 0:
@@ -306,7 +306,7 @@ class DecompParser:
 
             is_folded = _pop_from_set(extra_flags, "folded")
 
-            self._warn_if_markers_not_empty(extra_strings, extra_flags)
+            self._warn_if_extras_not_empty(extra_strings, extra_flags)
 
             self._symbols.append(
                 ParserFunction(
@@ -359,7 +359,7 @@ class DecompParser:
             else:
                 base_class = extra_strings.pop("base_class", None)
 
-            self._warn_if_markers_not_empty(extra_strings, extra_flags)
+            self._warn_if_extras_not_empty(extra_strings, extra_flags)
 
             self._symbols.append(
                 ParserVtable(
@@ -432,7 +432,7 @@ class DecompParser:
 
                 data_type_annotation = extra_strings.pop("type", None)
 
-                self._warn_if_markers_not_empty(extra_strings, extra_flags)
+                self._warn_if_extras_not_empty(extra_strings, extra_flags)
 
                 self._symbols.append(
                     ParserVariable(

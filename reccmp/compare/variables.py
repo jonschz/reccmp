@@ -7,7 +7,7 @@ from struct import unpack, error as StructError
 from typing_extensions import Self
 from reccmp.formats import Image
 from reccmp.formats.exceptions import InvalidVirtualReadError
-from reccmp.compare.db import EntityDb, ReccmpMatch
+from reccmp.compare.db import EntityDb, ReccmpEntity, ReccmpMatch
 from reccmp.cvdump.cvinfo import CvdumpTypeKey
 from reccmp.cvdump.types import (
     CvdumpTypesParser,
@@ -234,6 +234,31 @@ class VariableComparator:
     orig_bin: Image
     recomp_bin: Image
 
+    def _is_synthetic_match(
+        self,
+        orig_addr: int,
+        recomp_addr: int,
+        orig_ent: ReccmpEntity,
+        recomp_ent: ReccmpEntity,
+    ):
+        """Checks if the original pointer points at an entity that has no symbol in the recomp."""
+
+        matched_orig_addr = orig_ent.addr(ImageId.ORIG)
+        matched_recomp_addr = recomp_ent.addr(ImageId.RECOMP)
+
+        assert (
+            matched_orig_addr is not None and matched_recomp_addr is not None
+        ), "Cannot happen but isn't covered by the type system"
+
+        return (
+            # Condition 1: the orig match is exact
+            matched_orig_addr == orig_addr
+            # Condition 2: There is a code annotation stating that the recomp symbol is missing
+            and orig_ent.get("no_recomp_symbol", False)
+            # Condition 3: This address in recomp is unoccupied, i.e. the previous known recomp entity does not overlap this address
+            and matched_recomp_addr + recomp_ent.any_size(ImageId.RECOMP) <= recomp_addr
+        )
+
     def _create_synthetic_match(
         self, orig_addr: int, recomp_addr: int
     ) -> tuple[bool, list[ReccmpMatch]]:
@@ -272,29 +297,8 @@ class VariableComparator:
 
         if orig_ent is None or recomp_ent is None:
             return False, []
-        matched_orig_addr = orig_ent.addr(ImageId.ORIG)
-        matched_recomp_addr = recomp_ent.addr(ImageId.RECOMP)
 
-        if matched_orig_addr is None or matched_recomp_addr is None:
-            # probably can't happen, but the type system doesn't cover that at the moment
-            return False, []
-
-        if (
-            (
-                # Condition 1: the orig match is exact
-                matched_orig_addr
-                == orig_addr
-            )
-            and (
-                # Condition 2: There is a code annotation stating that the recomp symbol is missing
-                orig_ent.get("no_recomp_symbol", False)
-            )
-            and (
-                # Condition 3: No entity in recomp has an overlap with this recomp address
-                matched_recomp_addr + recomp_ent.any_size(ImageId.RECOMP)
-                <= recomp_addr
-            )
-        ):
+        if self._is_synthetic_match(orig_addr, recomp_addr, orig_ent, recomp_ent):
             # We found a pointer to an entity that does not have a symbol in recomp.
             # We therefore create a synthetic match.
             return self._create_synthetic_match(orig_addr, recomp_addr)

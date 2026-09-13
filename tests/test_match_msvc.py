@@ -1,5 +1,7 @@
 """Tests MSVC-specific match strategies"""
 
+# pylint:disable=too-many-lines
+
 from typing import TypeVar
 from unittest.mock import Mock, ANY, patch
 import pytest
@@ -660,6 +662,82 @@ def test_match_variables_type_null(db: EntityDb, types: CvdumpTypesParser):
     assert assert_defined(db.get(ImageId.ORIG, 123)).recomp_addr == 555
     assert assert_defined(db.get(ImageId.RECOMP, 555)).orig_addr == 123
     assert db.count() == 1
+
+
+def test_match_variable_no_recomp_symbol_flag(
+    db: EntityDb, types: CvdumpTypesParser, report: Mock
+):
+    """Does not report a warning if `no_recomp_symbol` is set on an orig symbol that does not match"""
+
+    with db.batch() as batch:
+        batch.set(
+            ImageId.ORIG, 123, name="hello", type=EntityType.DATA, no_recomp_symbol=True
+        )
+
+    match_variables(db, types, report)
+
+    report.assert_not_called()
+
+
+TEST_CVDUMP_LINES = """
+0x10e0 : Length = 86, Leaf = 0x1203 LF_FIELDLIST
+    list[0] = LF_MEMBER, public, type = T_REAL32(0040), offset = 0
+        member name = 'x'
+    list[1] = LF_MEMBER, public, type = T_REAL32(0040), offset = 4
+        member name = 'y'
+    list[2] = LF_MEMBER, public, type = T_REAL32(0040), offset = 8
+        member name = 'z'
+
+0x10e1 : Length = 34, Leaf = 0x1505 LF_STRUCTURE
+    # members = 3,  field list type 0x10e0,
+    Derivation list type 0x0000, VT shape type 0x0000
+    Size = 12, class name = MyAnnotatedType, UDT(0x000010e1)
+"""
+
+
+def test_match_variable_annotation_lookup_success(
+    db: EntityDb, types: CvdumpTypesParser, report: Mock
+):
+    """Successfully looks up a data type in the type database based on its annotation"""
+
+    with db.batch() as batch:
+        batch.set(
+            ImageId.ORIG,
+            123,
+            name="hello",
+            type=EntityType.DATA,
+            data_type_annotation="MyAnnotatedType",
+            no_recomp_symbol=True,
+        )
+
+    types.read_all(TEST_CVDUMP_LINES)
+
+    match_variables(db, types, report)
+
+    report.assert_not_called()
+    orig_entity = assert_defined(db.get(ImageId.ORIG, 123))
+    assert orig_entity.get("data_type") == 0x10E1
+    assert orig_entity.any_size() == 12
+
+
+def test_match_variable_annotation_lookup_not_found(
+    db: EntityDb, types: CvdumpTypesParser, report: Mock
+):
+    """Unsuccessfully looks up a data type in the type database based on its annotation"""
+
+    with db.batch() as batch:
+        batch.set(
+            ImageId.ORIG,
+            123,
+            name="hello",
+            type=EntityType.DATA,
+            data_type_annotation="MyAnnotatedType",
+            no_recomp_symbol=True,
+        )
+
+    match_variables(db, types, report)
+
+    report.assert_called_with(ReccmpEvent.INVALID_USER_DATA, 123, msg=ANY)
 
 
 #### match_strings ####
